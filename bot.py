@@ -12,7 +12,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "624":
         await update.message.reply_text("✅ السؤال 624:\nالحل هو C - التكلفة الثابتة لا تتغير مع الإنتاج")
     else:
-        await update.message.reply_text(f"استلمت: {text} - لسا عم نضيف الحلول")
+        await update.message.reply_text(f"استلمت: {text}")
 
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
