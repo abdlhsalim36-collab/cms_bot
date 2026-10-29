@@ -1,41 +1,61 @@
-import os, re, threading
+import os, re, threading, base64, requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
+GEMINI = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", 10000))
 
-FAULTS_DB = {
-    "10256": {"tr": "Küçük Düğüm Hattı Arızalı", "ar": "عطل خط العقدة الصغيرة", "cause": "حساس العقدة ما شاف الخيط / ST=90/350 الشد نازل", "fix": "1- نضف حساس العقدة\n2- تأكد خيط 90 مو مقطوع\n3- اعمل Reset"},
-    "624": {"tr": "İğne yatağını yağlayın", "ar": "زيّت سرير الإبر", "cause": "الماكينة بدها تزييت ST=62/100 T=95", "fix": "زيّت سرير الإبر بزيت Stoll"},
-    "615": {"tr": "Parça sayacı ST=0", "ar": "عداد القطع ST=0", "cause": "الماكينة خلصت العدد المطلوب ST=0/109 T=219 L569\nالماكينة واقفة لأن العداد صفر", "fix": "1- دوس على عداد القطع وصفر العداد\n2- أو دوس Reset للعداد\n3- دوس Start الأخضر"},
-    "642": {"tr": "Yağlama", "ar": "تنبيه تزييت", "cause": "تنبيه تزييت", "fix": "زيّت الماكينة"},
-}
-
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"CMS Bot V5 - All codes included")
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"CMS AI Vision Bot LIVE")
 
 def run_web(): HTTPServer(('0.0.0.0', PORT), H).serve_forever()
 
-async def start(u,c): await u.message.reply_text("👷‍♂️ بوت CMS جاهز!\nابعت صورة واكتب رقمها مثل 615")
+def ask_gemini(image_bytes, caption):
+    if not GEMINI: return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI}"
+    b64 = base64.b64encode(image_bytes).decode()
+    prompt = f"""
+    انت خبير صيانة ماكينات Stoll CMS HP.
+    حلل صورة شاشة الماكينة. اقرأ Kod و Uyari Metni و ST و T و L و MSEC.
+    اعطيني:
+    1- Kod: ...
+    2- الترجمة للعربي
+    3- شو العذر الحقيقي؟ (ليش واقفة)
+    4- الحل خطوة بخطوة بالعربي السوري العامي
+    نص المستخدم: {caption}
+    """
+    data = {"contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/jpeg", "data": b64}}]}]}
+    try:
+        r = requests.post(url, json=data, timeout=30).json()
+        return r['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        return f"خطأ AI: {e}"
+
+async def start(u,c): await u.message.reply_text("👷‍♂️ بوت CMS صار يشوف!\nابعت أي صورة بدون ما تكتب رقم، أنا بقرأها لحالي بالذكاء الاصطناعي")
 
 async def handle(u,c):
-    txt = (u.message.text or u.message.caption or "")
-    m = re.search(r'\d+', txt)
-    if not m:
-        await u.message.reply_text("اكتب رقم الكود مثل 615 مع الصورة")
-        return
-    code = m.group(0)
-    f = FAULTS_DB.get(code)
-    if f:
-        await u.message.reply_text(f"✅ Kod: {code}\n🇹🇷 {f['tr']}\n🇸🇾 {f['ar']}\n\n❌ العذر:\n{f['cause']}\n\n✅ الحل:\n{f['fix']}")
+    txt = u.message.text or u.message.caption or ""
+    # اذا صورة
+    if u.message.photo:
+        photo = await u.message.photo[-1].get_file()
+        b = await photo.download_as_bytearray()
+        if GEMINI:
+            await u.message.reply_text("🔍 عم اقرأ الصورة بالذكاء الاصطناعي... ثانية")
+            ans = ask_gemini(bytes(b), txt)
+            await u.message.reply_text(ans)
+        else:
+            # بدون AI - نحاول نقرأ الرقم
+            m = re.search(r'\d+', txt)
+            code = m.group(0) if m else "??"
+            await u.message.reply_text(f"⚠️ لسه ما حطيت مفتاح GEMINI_API_KEY\nبس قريت الكود: {code}\n\nاذا بدك يقرأ لحالو بدون كتابة، حط مفتاح Gemini ب Render")
     else:
-        await u.message.reply_text(f"⚠️ كود {code} جديد - ضيفو للقاموس:\n{txt}")
+        await u.message.reply_text(f"اكتب سؤالك أو ابعت صورة\nالنص: {txt}")
 
 threading.Thread(target=run_web, daemon=True).start()
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, handle))
-print("CMS V5 Running...")
+print("CMS AI Bot Running")
 app.run_polling()
