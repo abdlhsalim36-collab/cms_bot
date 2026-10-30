@@ -10,17 +10,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import google.generativeai as genai
 from PIL import Image
 
-# --- Flask عشان Render ما يطفي البوت ---
 app_flask = Flask(__name__)
 @app_flask.route('/')
 def home():
     return "Bot is Live!"
-
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app_flask.run(host="0.0.0.0", port=port)
 
-# --- البوت ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,10 +25,24 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash")
+
+# جرب الموديلات بالترتيب من الأحدث للأقدم
+def get_model():
+    for name in ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-flash-latest"]:
+        try:
+            m = genai.GenerativeModel(name)
+            # اختبار سريع
+            m.generate_content("hi")
+            print(f"Using model: {name}")
+            return m
+        except Exception as e:
+            print(f"Model {name} failed: {e}")
+            continue
+    return genai.GenerativeModel("gemini-1.5-flash")
+
+model = get_model()
 
 DB_FILE = "codes_db.json"
-
 def load_db():
     if os.path.exists(DB_FILE):
         try:
@@ -40,17 +51,15 @@ def load_db():
         except:
             return {}
     return {}
-
 def save_db(db):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
-
 db = load_db()
 
 SYSTEM_PROMPT = "انت خبير صيانة ماكينات CMS للخشب. اشرح الخطأ بلهجة سورية بسيطة واعطي 4 خطوات عملية للحل."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📸 ابعت صورة الخطأ واكتب معها بالتعليق رقم الكود مثل 4339")
+    await update.message.reply_text("📸 ابعت صورة الخطأ واكتب معها 4339")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -61,7 +70,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(image_bytes))
         await update.message.reply_text(f"🔍 عم حلل الكود {code}...")
-        response = model.generate_content([f"{SYSTEM_PROMPT} الكود: {code}", image])
+        response = model.generate_content([f"{SYSTEM_PROMPT} الكود: {code}. الصورة فيها خطأ Tarak kapak metal plakasi.", image])
         ans = response.text
         db[code] = {"count":1, "solution":ans}
         save_db(db)
