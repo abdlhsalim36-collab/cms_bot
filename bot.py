@@ -10,6 +10,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 import google.generativeai as genai
 from PIL import Image
 
+# Flask عشان Render
 app_flask = Flask(__name__)
 @app_flask.route('/')
 def home():
@@ -25,22 +26,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-
-# جرب الموديلات بالترتيب من الأحدث للأقدم
-def get_model():
-    for name in ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-flash-latest"]:
-        try:
-            m = genai.GenerativeModel(name)
-            # اختبار سريع
-            m.generate_content("hi")
-            print(f"Using model: {name}")
-            return m
-        except Exception as e:
-            print(f"Model {name} failed: {e}")
-            continue
-    return genai.GenerativeModel("gemini-1.5-flash")
-
-model = get_model()
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 DB_FILE = "codes_db.json"
 def load_db():
@@ -56,10 +42,10 @@ def save_db(db):
         json.dump(db, f, ensure_ascii=False, indent=2)
 db = load_db()
 
-SYSTEM_PROMPT = "انت خبير صيانة ماكينات CMS للخشب. اشرح الخطأ بلهجة سورية بسيطة واعطي 4 خطوات عملية للحل."
+SYSTEM_PROMPT = "انت خبير صيانة ماكينات CMS للخشب. اشرح الخطأ بلهجة سورية بسيطة واعطي 4 خطوات عملية للحل. اذا الكود 4339 فهو خاص بـ Tarak kapak metal plakasi."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📸 ابعت صورة الخطأ واكتب معها 4339")
+    await update.message.reply_text("📸 ابعت صورة الخطأ واكتب معها بالتعليق رقم الكود مثل 4339")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -70,14 +56,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(image_bytes))
         await update.message.reply_text(f"🔍 عم حلل الكود {code}...")
-        response = model.generate_content([f"{SYSTEM_PROMPT} الكود: {code}. الصورة فيها خطأ Tarak kapak metal plakasi.", image])
+        response = model.generate_content([f"{SYSTEM_PROMPT} الكود: {code}", image])
         ans = response.text
         db[code] = {"count":1, "solution":ans}
         save_db(db)
         await update.message.reply_text(f"✅ كود {code}:\n\n{ans}")
     except Exception as e:
         logger.error(e)
-        await update.message.reply_text(f"خطأ: {e}")
+        await update.message.reply_text(f"خطأ: {e}\nجرب تبعت الصورة مرة تانية")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -92,6 +78,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    print("Bot Started + Flask Started")
     app.run_polling()
 
 if __name__ == "__main__":
