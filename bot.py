@@ -1,20 +1,13 @@
-import os
-import json
-import logging
-import re
-import io
-import threading
+import os, json, logging, re, io, threading
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
 from PIL import Image
 
-# Flask عشان Render ما يطفي البوت
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home():
-    return "Bot is Live!"
+def home(): return "Bot is Live!"
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app_flask.run(host="0.0.0.0", port=port)
@@ -26,18 +19,35 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+def ask_gemini(prompt_or_parts):
+    # جوجل غيرت الاسماء، منجرب كل الموديلات الجديدة
+    models_to_try = [
+        "gemini-3.8-flash",
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash"
+    ]
+    for m_name in models_to_try:
+        try:
+            print(f"Trying model: {m_name}")
+            resp = client.models.generate_content(model=m_name, contents=prompt_or_parts)
+            print(f"Success with: {m_name}")
+            return resp.text
+        except Exception as e:
+            print(f"Failed {m_name}: {e}")
+            continue
+    raise Exception("كل الموديلات فشلت - راجع API Key")
+
 DB_FILE = "codes_db.json"
 def load_db():
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
+            with open(DB_FILE, "r", encoding="utf-8") as f: return json.load(f)
+        except: return {}
     return {}
 def save_db(db):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
+    with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(db, f, ensure_ascii=False, indent=2)
 db = load_db()
 
 SYSTEM_PROMPT = "انت خبير صيانة ماكينات CMS للخشب التركية. اشرح الخطأ بلهجة سورية بسيطة واعطي 4 خطوات عملية للحل."
@@ -54,11 +64,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_bytes = await photo_file.download_as_bytearray()
         image = Image.open(io.BytesIO(image_bytes))
         await update.message.reply_text(f"🔍 عم حلل الكود {code}...")
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[f"{SYSTEM_PROMPT} الكود: {code}", image]
-        )
-        ans = response.text
+        ans = ask_gemini([f"{SYSTEM_PROMPT} الكود: {code}", image])
         db[code] = {"solution": ans}
         save_db(db)
         await update.message.reply_text(f"✅ كود {code}:\n\n{ans}")
@@ -68,11 +74,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=f"{SYSTEM_PROMPT}\n{update.message.text}"
-        )
-        await update.message.reply_text(response.text)
+        ans = ask_gemini(f"{SYSTEM_PROMPT}\n{update.message.text}")
+        await update.message.reply_text(ans)
     except Exception as e:
         await update.message.reply_text(f"خطأ: {e}")
 
@@ -82,7 +85,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    print("Bot Started")
     app.run_polling()
 
 if __name__ == "__main__":
